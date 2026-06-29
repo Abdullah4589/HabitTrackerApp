@@ -7,10 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm start          # start Expo dev server (scan QR with Expo Go)
-npm run android    # launch on Android emulator/device
-npm run ios        # launch on iOS simulator/device
-npm run web        # launch in browser
+npm start                  # start Expo dev server (scan QR with Expo Go)
+npm run android            # launch on Android emulator/device
+npm run ios                # launch on iOS simulator/device
+npm run web                # launch in browser
+npx expo start --clear     # start with Metro cache wiped (use when modules feel stale)
 ```
 
 There are no lint or test scripts configured.
@@ -33,7 +34,7 @@ The OpenRouter API key is **not** stored in `.env` — it lives in Supabase Edge
 Expo Router v3 (file-based). Auth gates everything:
 
 - `app/index.tsx` — checks `isHydrating` (shows spinner), then `userId` (redirects to `/auth` if null), then `onboardingComplete` (redirects to `/onboarding` or `/(tabs)`)
-- `app/auth/` — sign-in (`index.tsx`) and sign-up (`sign-up.tsx`) screens; a Stack defined in `app/auth/_layout.tsx`
+- `app/auth/` — sign-in (`index.tsx`) and sign-up (`sign-up.tsx`) screens; a Stack defined in `app/auth/_layout.tsx`. `forgot-password.tsx` and `reset-password.tsx` exist in this folder but are **not registered** in the layout and are effectively dead code.
 - `app/onboarding.tsx` — 5-step linear flow; calls `completeOnboarding()` then `router.replace('/(tabs)')`
 - `app/(tabs)/` — three tabs: Today (`index`), History, Challenges
 - `app/habit-modal.tsx` — add/edit habit as a bottom-sheet modal
@@ -89,6 +90,8 @@ Tables: `profiles`, `habits`, `habit_logs`, `challenges`, `ai_insights`. All hav
 
 **Theme** — `src/theme.ts` exports `Colors`, `HabitColors`, `Radii`, `Spacing`. Dark theme (`bg: #0F172A`). Always use these tokens.
 
+**App scheme** — `habittrackerapp://` (defined in `app.json`). Required for any deep-link or OAuth redirect work; must be added to Supabase's allowed redirect URLs list.
+
 ## Key constraints
 
 - Expo SDK 56 / React Native 0.85.3 / React 19. Check versioned docs before using any Expo API.
@@ -97,3 +100,18 @@ Tables: `profiles`, `habits`, `habit_logs`, `challenges`, `ai_insights`. All hav
 - Profile row must exist before inserting habits or challenges (FK constraint). Always chain: `pushProfile → then → pushHabit/pushChallenge`.
 - `isHydrating` starts `true` and is only set `false` inside `hydrateFromRemote` or `clearUserData`. Never set it elsewhere.
 - Debug actions (`debugMarkChallengeDay`, `debugFillChallenge`, `debugResetChallenge`, `debugAddHabitLog`) exist for manual testing; do not remove them.
+
+## Known issues / open bugs
+
+- **Password reset flow is broken** — `app/auth/reset-password.tsx` is not registered in `app/auth/_layout.tsx`, so it is unreachable. `forgot-password.tsx` also uses `redirectTo: 'habittrackerapp://'` (the app root) instead of `'habittrackerapp://auth/reset-password'`. Additionally, `reset-password.tsx` calls `useStore(s => s.setPasswordRecovery)` which does not exist in the store. All three issues must be fixed together before password reset works.
+
+## Security notes
+
+- **Rate limiting missing on AI endpoint** — `supabase/functions/ai-insights/` makes a paid OpenRouter call on every invocation with no per-user rate limit. Before shipping publicly, add a check against `ai_insights` row count in the last hour and reject with 429 if exceeded.
+- **Prompt injection surface** — `habitStats[].name` and `userName` are interpolated directly into the OpenRouter prompt in `buildPrompt()`. Validate and truncate these fields before interpolation.
+- **`handle_new_user` is SECURITY DEFINER** — the trigger function in `schema.sql` runs with elevated privileges. Keep it minimal (only the `INSERT INTO profiles` statement). Do not expand it.
+- **`getSession()` pre-flight** — `src/ai.ts` uses `getSession()` (reads local storage) as a pre-flight check before calling the Edge Function. The Edge Function independently validates via `getUser()`, so this is safe, but the client check is weaker than `getUser()`.
+
+## Screenshots
+
+App screenshots (web build, 390 px wide) are in `screenshots/`. They are committed to the repo for use in `README.md`. Regenerate them by running `npm run web` and using the browser automation workflow.

@@ -28,6 +28,13 @@ export interface Challenge {
   rewardClaimed: boolean;
 }
 
+export interface AIInsight {
+  id: string;
+  type: 'nudge' | 'weekly_summary' | 'monthly_summary';
+  content: string;
+  generatedAt: string;
+}
+
 export interface AppState {
   userName: string;
   onboardingComplete: boolean;

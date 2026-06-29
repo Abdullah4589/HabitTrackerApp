@@ -50,6 +50,7 @@ export default function HabitModal() {
 
   const handleSave = async () => {
     if (!name.trim()) return;
+    if (!existing && habits.length >= 5) return;
     const data = {
       name: name.trim(),
       icon,

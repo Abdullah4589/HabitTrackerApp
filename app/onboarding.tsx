@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useStore } from '../src/store';
 import { Colors, HabitColors, Radii, Spacing } from '../src/theme';
 import { requestNotificationPermissions, scheduleHabitReminders } from '../src/notifications';
@@ -25,7 +26,7 @@ const ICONS = ['🏃', '💧', '📖', '🧘', '💪', '🥗', '😴', '🚴', '
 const TOTAL_STEPS = 5;
 
 export default function Onboarding() {
-
+  const router = useRouter();
   const completeOnboarding = useStore(s => s.completeOnboarding);
 
   const [step, setStep] = useState(0);
@@ -58,20 +59,21 @@ export default function Onboarding() {
       targetCount: habitType === 'daily' ? 1 : targetCount,
     });
 
-    try {
-      const granted = await requestNotificationPermissions();
-      if (granted) {
-        await scheduleHabitReminders([{
-          id: 'tmp',
-          name,
-          icon: selectedIcon,
-          color: selectedColor,
-          type: habitType,
-          targetCount: habitType === 'daily' ? 1 : targetCount,
-          createdAt: new Date().toISOString(),
-        }]);
-      }
-    } catch {/* notifications optional */}
+    router.replace('/(tabs)');
+
+    // Notifications are optional — set up in the background after navigating
+    requestNotificationPermissions().then(granted => {
+      if (!granted) return;
+      scheduleHabitReminders([{
+        id: 'tmp',
+        name,
+        icon: selectedIcon,
+        color: selectedColor,
+        type: habitType,
+        targetCount: habitType === 'daily' ? 1 : targetCount,
+        createdAt: new Date().toISOString(),
+      }]).catch(() => {});
+    }).catch(() => {});
   };
 
   // Progress dots

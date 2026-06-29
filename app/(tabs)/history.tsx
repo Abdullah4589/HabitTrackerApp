@@ -1,13 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
+  Modal,
   Platform,
   StyleSheet,
   Text,
+  TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useStore } from '../../src/store';
+import { supabase } from '../../src/supabase';
 import { Colors, Radii, Spacing } from '../../src/theme';
 import ConsistencyChart from '../../src/components/ConsistencyChart';
 
@@ -27,7 +34,66 @@ function formatTime(iso: string): string {
 }
 
 export default function HistoryScreen() {
-  const { habits, getConsistencyData, getAllCompletedLogs, getStreak, getBestStreak, logs } = useStore();
+  const { habits, getConsistencyData, getAllCompletedLogs, getStreak, getBestStreak, logs, userName, clearUserData, updateUserName, fetchAIInsight, getLatestInsight, aiLoading } = useStore();
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  const weeklyInsight = getLatestInsight('weekly_summary');
+  const monthlyInsight = getLatestInsight('monthly_summary');
+
+  const handleGenerateSummary = async (type: 'weekly_summary' | 'monthly_summary') => {
+    setSummaryError(null);
+    try {
+      await fetchAIInsight(type);
+    } catch {
+      setSummaryError('Could not reach AI service. Try again later.');
+    }
+  };
+  const router = useRouter();
+
+  const handleEditName = () => {
+    setNameInput(userName);
+    setEditingName(true);
+  };
+
+  const handleSaveName = () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed || trimmed === userName) {
+      setEditingName(false);
+      return;
+    }
+    Alert.alert(
+      'Change Name',
+      `Are you sure you want to change your name to "${trimmed}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Change',
+          onPress: () => {
+            updateUserName(trimmed);
+            setEditingName(false);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await supabase.auth.signOut();
+          clearUserData();
+          router.replace('/auth');
+        },
+      },
+    ]);
+  };
   const allLogs = getAllCompletedLogs();
 
   // Group logs by date
@@ -69,7 +135,73 @@ export default function HistoryScreen() {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.title}>History</Text>
+        <TouchableOpacity style={styles.accountBtn} onPress={() => setShowAccountModal(true)}>
+          <Text style={styles.accountBtnText}>
+            {userName ? userName.charAt(0).toUpperCase() : '?'}
+          </Text>
+        </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={showAccountModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setShowAccountModal(false); setEditingName(false); }}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => { setShowAccountModal(false); setEditingName(false); }}
+        >
+          <View style={styles.accountSheet}>
+            {/* Name row */}
+            {editingName ? (
+              <View style={styles.nameEditRow}>
+                <TextInput
+                  style={styles.nameInput}
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  autoFocus
+                  placeholder="Your name"
+                  placeholderTextColor={Colors.textMuted}
+                  returnKeyType="done"
+                  onSubmitEditing={handleSaveName}
+                  onTouchStart={e => e.stopPropagation()}
+                />
+                <View style={styles.nameEditActions}>
+                  <TouchableOpacity
+                    style={styles.nameCancelBtn}
+                    onPress={() => setEditingName(false)}
+                  >
+                    <Text style={styles.nameCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.nameSaveBtn}
+                    onPress={handleSaveName}
+                  >
+                    <Text style={styles.nameSaveText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.nameRow} onPress={handleEditName} activeOpacity={0.7}>
+                <View>
+                  <Text style={styles.accountName}>{userName || 'Account'}</Text>
+                  <Text style={styles.editNameHint}>Tap to edit name</Text>
+                </View>
+                <Text style={styles.editIcon}>✏️</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.signOutBtn}
+              onPress={() => { setShowAccountModal(false); setEditingName(false); handleSignOut(); }}
+            >
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <FlatList
         data={[]}
@@ -93,6 +225,74 @@ export default function HistoryScreen() {
                   <Text style={styles.statsSummaryEmoji}>📈</Text>
                   <Text style={styles.statsSummaryNumber}>{sevenDayAverage}%</Text>
                   <Text style={styles.statsSummaryLabel}>7-Day Avg</Text>
+                </View>
+              </View>
+            )}
+
+            {/* AI Reflection Summaries */}
+            {habits.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>AI Reflections</Text>
+                <Text style={styles.sectionSub}>AI-generated summaries of your progress</Text>
+
+                {summaryError && (
+                  <Text style={styles.summaryError}>{summaryError}</Text>
+                )}
+
+                {/* Weekly */}
+                <View style={styles.summaryCard}>
+                  <View style={styles.summaryCardHeader}>
+                    <Text style={styles.summaryCardTitle}>Weekly Report</Text>
+                    <TouchableOpacity
+                      onPress={() => handleGenerateSummary('weekly_summary')}
+                      disabled={aiLoading}
+                      style={styles.generateBtn}
+                    >
+                      {aiLoading ? (
+                        <ActivityIndicator size="small" color={Colors.accent} />
+                      ) : (
+                        <Text style={styles.generateBtnText}>{weeklyInsight ? '↻ Refresh' : 'Generate'}</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  {weeklyInsight ? (
+                    <>
+                      <Text style={styles.summaryContent}>{weeklyInsight.content}</Text>
+                      <Text style={styles.summaryTimestamp}>
+                        Generated {new Date(weeklyInsight.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.summaryPlaceholder}>Tap Generate to see your weekly summary.</Text>
+                  )}
+                </View>
+
+                {/* Monthly */}
+                <View style={styles.summaryCard}>
+                  <View style={styles.summaryCardHeader}>
+                    <Text style={styles.summaryCardTitle}>Monthly Report</Text>
+                    <TouchableOpacity
+                      onPress={() => handleGenerateSummary('monthly_summary')}
+                      disabled={aiLoading}
+                      style={styles.generateBtn}
+                    >
+                      {aiLoading ? (
+                        <ActivityIndicator size="small" color={Colors.accent} />
+                      ) : (
+                        <Text style={styles.generateBtnText}>{monthlyInsight ? '↻ Refresh' : 'Generate'}</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  {monthlyInsight ? (
+                    <>
+                      <Text style={styles.summaryContent}>{monthlyInsight.content}</Text>
+                      <Text style={styles.summaryTimestamp}>
+                        Generated {new Date(monthlyInsight.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.summaryPlaceholder}>Tap Generate to see your monthly summary.</Text>
+                  )}
                 </View>
               </View>
             )}
@@ -195,6 +395,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bg,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: Spacing.md,
     paddingTop: Platform.OS === 'android' ? 16 : 8,
     paddingBottom: 12,
@@ -204,6 +407,114 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.textPrimary,
     letterSpacing: -0.4,
+  },
+  accountBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  accountSheet: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: Radii.xl,
+    borderTopRightRadius: Radii.xl,
+    padding: Spacing.lg,
+    paddingBottom: 40,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 16,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  accountName: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  editNameHint: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  editIcon: {
+    fontSize: 18,
+  },
+  nameEditRow: {
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: 10,
+  },
+  nameInput: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    color: Colors.textPrimary,
+    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  nameEditActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  nameCancelBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: 'center',
+    borderRadius: Radii.md,
+    backgroundColor: Colors.bg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  nameCancelText: {
+    color: Colors.textMuted,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  nameSaveBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: 'center',
+    borderRadius: Radii.md,
+    backgroundColor: Colors.accent,
+  },
+  nameSaveText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  signOutBtn: {
+    backgroundColor: Colors.rose + '22',
+    borderRadius: Radii.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.rose + '44',
+  },
+  signOutText: {
+    color: Colors.rose,
+    fontWeight: '700',
+    fontSize: 15,
   },
   section: {
     paddingHorizontal: Spacing.md,
@@ -374,5 +685,57 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  summaryCard: {
+    backgroundColor: Colors.bg,
+    borderRadius: Radii.md,
+    padding: Spacing.md,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.accent + '33',
+  },
+  summaryCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  summaryCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  generateBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.accent + '22',
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  generateBtnText: {
+    color: Colors.accent,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  summaryContent: {
+    fontSize: 14,
+    color: Colors.textPrimary,
+    lineHeight: 21,
+  },
+  summaryTimestamp: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 8,
+  },
+  summaryPlaceholder: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  summaryError: {
+    fontSize: 13,
+    color: Colors.rose,
+    marginBottom: 8,
   },
 });

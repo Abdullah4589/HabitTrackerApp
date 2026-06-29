@@ -1,7 +1,19 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Habit, HabitLog, Challenge } from './types';
+import { Habit, HabitLog, Challenge, AIInsight } from './types';
+import {
+  pushHabit,
+  pushHabitLog,
+  pushChallenge,
+  pushProfile,
+  deleteHabitRemote,
+  deleteHabitLog,
+  pushAll,
+  pullAll,
+  pullAIInsights,
+} from './sync';
+import { fetchInsight } from './ai';
 
 function today(): string {
   return new Date().toISOString().split('T')[0];
@@ -50,19 +62,38 @@ function getBestStreakFn(logs: HabitLog[], habitId: string): number {
 }
 
 interface StoreState {
+  // Auth (not persisted)
+  userId: string | null;
+  isHydrating: boolean;
+
+  // User data (persisted as local cache)
   userName: string;
   onboardingComplete: boolean;
   habits: Habit[];
   logs: HabitLog[];
   challenges: Challenge[];
 
-  // Actions
+  // AI insights (in-memory, pulled from remote on hydration)
+  aiInsights: AIInsight[];
+  aiLoading: boolean;
+
+  // Auth actions
+  hydrateFromRemote: (userId: string) => Promise<void>;
+  clearUserData: () => void;
+
+  // AI actions
+  fetchAIInsight: (type: AIInsight['type']) => Promise<void>;
+  getLatestInsight: (type: AIInsight['type']) => AIInsight | undefined;
+
+  // Data actions
   completeOnboarding: (userName: string, firstHabit: Omit<Habit, 'id' | 'createdAt'>) => void;
+  updateUserName: (name: string) => void;
   addHabit: (habit: Omit<Habit, 'id' | 'createdAt'>) => void;
   editHabit: (id: string, updates: Partial<Habit>) => void;
   deleteHabit: (id: string) => void;
   /** Returns 'completed' when habit reaches its target for the day */
   logHabit: (habitId: string) => 'incremented' | 'completed' | 'already_done';
+  unlogHabit: (habitId: string) => void;
   markChallengeDay: (challengeId: string) => void;
   claimChallengeReward: (challengeId: string) => void;
   addChallenge: (name: string, habitIds: string[], durationDays: number) => void;
@@ -73,7 +104,7 @@ interface StoreState {
   debugAddHabitLog: (habitId: string, date: string) => void;
   debugFillChallenge: (challengeId: string) => void;
 
-  // Selectors (computed inline for simplicity)
+  // Selectors
   getStreak: (habitId: string) => number;
   getBestStreak: (habitId: string) => number;
   getTodayLog: (habitId: string) => HabitLog | undefined;
@@ -84,11 +115,70 @@ interface StoreState {
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
+      // ── Initial state ───────────────────────────────────────
+      userId: null,
+      isHydrating: true,
       userName: '',
       onboardingComplete: false,
       habits: [],
       logs: [],
       challenges: [],
+      aiInsights: [],
+      aiLoading: false,
+
+      // ── Auth actions ────────────────────────────────────────
+
+      async hydrateFromRemote(userId) {
+        try {
+          const [remote, aiInsights] = await Promise.all([
+            pullAll(userId),
+            pullAIInsights(userId),
+          ]);
+
+          if (remote.profile) {
+            // Returning user: load their remote data into the local cache
+            set({
+              userId,
+              userName: remote.profile.userName,
+              onboardingComplete: remote.profile.onboardingComplete,
+              habits: remote.habits,
+              logs: remote.logs,
+              challenges: remote.challenges,
+              aiInsights,
+              isHydrating: false,
+            });
+          } else {
+            // No profile row — user signed up before the schema/trigger existed.
+            // Create the profile first (habits/challenges FK depend on it).
+            const { habits, logs, challenges, userName, onboardingComplete } = get();
+            await pushProfile(userId, userName, onboardingComplete);
+            if (habits.length > 0 || onboardingComplete) {
+              await pushAll(userId, { habits, logs, challenges, userName, onboardingComplete });
+            }
+            set({ userId, isHydrating: false });
+          }
+        } catch (e) {
+          console.error('[hydrateFromRemote]', e);
+          // Offline or network error: keep using local cache
+          set({ userId, isHydrating: false });
+        }
+      },
+
+      clearUserData() {
+        set({
+          userId: null,
+          isHydrating: false,
+          userName: '',
+          onboardingComplete: false,
+          habits: [],
+          logs: [],
+          challenges: [],
+          aiInsights: [],
+          aiLoading: false,
+        });
+      },
+
+      // ── Data actions ────────────────────────────────────────
 
       completeOnboarding(userName, firstHabitData) {
         const habitId = uid();
@@ -106,12 +196,24 @@ export const useStore = create<StoreState>()(
           completedDays: [],
           rewardClaimed: false,
         };
-        set({
-          userName,
-          onboardingComplete: true,
-          habits: [habit],
-          challenges: [challenge],
-        });
+        set({ userName, onboardingComplete: true, habits: [habit], challenges: [challenge] });
+
+        const { userId } = get();
+        if (userId) {
+          // Profile must exist before habits/challenges (FK constraint) — chain, don't race
+          pushProfile(userId, userName, true)
+            .then(() => Promise.all([
+              pushHabit(userId, habit),
+              pushChallenge(userId, challenge),
+            ]))
+            .catch(e => console.error('[sync:completeOnboarding]', e));
+        }
+      },
+
+      updateUserName(name) {
+        set({ userName: name });
+        const { userId, onboardingComplete } = get();
+        if (userId) pushProfile(userId, name, onboardingComplete).catch(e => console.error('[sync:updateUserName]', e));
       },
 
       addHabit(habitData) {
@@ -121,12 +223,19 @@ export const useStore = create<StoreState>()(
           ...habitData,
         };
         set(s => ({ habits: [...s.habits, habit] }));
+
+        const { userId } = get();
+        if (userId) pushHabit(userId, habit).catch(console.error);
       },
 
       editHabit(id, updates) {
         set(s => ({
           habits: s.habits.map(h => (h.id === id ? { ...h, ...updates } : h)),
         }));
+
+        const { userId, habits } = get();
+        const habit = habits.find(h => h.id === id);
+        if (userId && habit) pushHabit(userId, habit).catch(console.error);
       },
 
       deleteHabit(id) {
@@ -134,6 +243,9 @@ export const useStore = create<StoreState>()(
           habits: s.habits.filter(h => h.id !== id),
           logs: s.logs.filter(l => l.habitId !== id),
         }));
+
+        const { userId } = get();
+        if (userId) deleteHabitRemote(id).catch(console.error);
       },
 
       logHabit(habitId) {
@@ -175,19 +287,60 @@ export const useStore = create<StoreState>()(
         }
 
         if (isComplete) {
-          // Update any active challenges
           const { challenges } = get();
           const updatedChallenges = challenges.map(c => {
             if (c.habitIds.includes(habitId) && !c.completedDays.includes(date)) {
-              const completedDays = [...c.completedDays, date];
-              return { ...c, completedDays };
+              return { ...c, completedDays: [...c.completedDays, date] };
             }
             return c;
           });
           set({ challenges: updatedChallenges });
         }
 
+        // Background sync
+        const { userId } = get();
+        if (userId) {
+          const log = get().logs.find(l => l.habitId === habitId && l.date === date);
+          if (log) pushHabitLog(userId, log).catch(console.error);
+          if (isComplete) {
+            get().challenges
+              .filter(c => c.habitIds.includes(habitId))
+              .forEach(c => pushChallenge(userId, c).catch(console.error));
+          }
+        }
+
         return isComplete ? 'completed' : 'incremented';
+      },
+
+      unlogHabit(habitId) {
+        const { logs } = get();
+        const date = today();
+        const existing = logs.find(l => l.habitId === habitId && l.date === date);
+        if (!existing || existing.completedCount === 0) return;
+
+        const newCount = existing.completedCount - 1;
+
+        if (newCount === 0) {
+          set(s => ({ logs: s.logs.filter(l => l.id !== existing.id) }));
+        } else {
+          set(s => ({
+            logs: s.logs.map(l =>
+              l.id === existing.id
+                ? { ...l, completedCount: newCount, fullyCompletedAt: undefined }
+                : l
+            ),
+          }));
+        }
+
+        const { userId } = get();
+        if (userId) {
+          if (newCount === 0) {
+            deleteHabitLog(existing.id).catch(e => console.error('[sync:unlogHabit]', e));
+          } else {
+            const updated = get().logs.find(l => l.habitId === habitId && l.date === date);
+            if (updated) pushHabitLog(userId, updated).catch(e => console.error('[sync:unlogHabit]', e));
+          }
+        }
       },
 
       markChallengeDay(challengeId) {
@@ -199,6 +352,10 @@ export const useStore = create<StoreState>()(
               : c
           ),
         }));
+
+        const { userId, challenges } = get();
+        const challenge = challenges.find(c => c.id === challengeId);
+        if (userId && challenge) pushChallenge(userId, challenge).catch(console.error);
       },
 
       claimChallengeReward(challengeId) {
@@ -207,6 +364,10 @@ export const useStore = create<StoreState>()(
             c.id === challengeId ? { ...c, rewardClaimed: true } : c
           ),
         }));
+
+        const { userId, challenges } = get();
+        const challenge = challenges.find(c => c.id === challengeId);
+        if (userId && challenge) pushChallenge(userId, challenge).catch(console.error);
       },
 
       addChallenge(name, habitIds, durationDays) {
@@ -220,7 +381,35 @@ export const useStore = create<StoreState>()(
           rewardClaimed: false,
         };
         set(s => ({ challenges: [...s.challenges, challenge] }));
+
+        const { userId } = get();
+        if (userId) pushChallenge(userId, challenge).catch(console.error);
       },
+
+      // ── AI actions ──────────────────────────────────────────
+
+      async fetchAIInsight(type) {
+        const { habits, logs, userName, aiLoading } = get();
+        if (aiLoading || habits.length === 0) return;
+        set({ aiLoading: true });
+        try {
+          const insight = await fetchInsight(type, habits, logs, userName);
+          set(s => ({
+            aiInsights: [insight, ...s.aiInsights.filter(i => i.type !== type || i.id !== insight.id)],
+            aiLoading: false,
+          }));
+        } catch (e) {
+          console.error('[store:fetchAIInsight]', e);
+          set({ aiLoading: false });
+          throw e;
+        }
+      },
+
+      getLatestInsight(type) {
+        return get().aiInsights.find(i => i.type === type);
+      },
+
+      // ── Debug / dev tools (no remote sync intentionally) ────
 
       debugMarkChallengeDay(challengeId, date) {
         set(s => ({
@@ -308,7 +497,6 @@ export const useStore = create<StoreState>()(
           };
           set(s => ({ logs: [...s.logs, log] }));
         }
-        // Also mark challenge days
         const { challenges } = get();
         set({
           challenges: challenges.map(c => {
@@ -319,6 +507,8 @@ export const useStore = create<StoreState>()(
           }),
         });
       },
+
+      // ── Selectors ───────────────────────────────────────────
 
       getStreak(habitId) {
         return getStreak(get().logs, habitId);
@@ -360,6 +550,14 @@ export const useStore = create<StoreState>()(
     {
       name: 'habit-tracker-store',
       storage: createJSONStorage(() => AsyncStorage),
+      // userId and isHydrating come from the live Supabase session — never persist them
+      partialize: state => ({
+        userName: state.userName,
+        onboardingComplete: state.onboardingComplete,
+        habits: state.habits,
+        logs: state.logs,
+        challenges: state.challenges,
+      }),
     }
   )
 );

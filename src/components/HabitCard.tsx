@@ -17,12 +17,14 @@ interface Props {
   log?: HabitLog;
   streak: number;
   onLog: () => 'incremented' | 'completed' | 'already_done';
+  onUnlog: () => void;
   onLongPress?: () => void;
+  onDelete?: () => void;
   onAllComplete?: () => void;
 }
 
 
-export default function HabitCard({ habit, log, streak, onLog, onLongPress, onAllComplete }: Props) {
+export default function HabitCard({ habit, log, streak, onLog, onUnlog, onLongPress, onDelete, onAllComplete }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
   const glow = useRef(new Animated.Value(0)).current;
   const [burst, setBurst] = useState(false);
@@ -52,6 +54,12 @@ export default function HabitCard({ habit, log, streak, onLog, onLongPress, onAl
       Animated.timing(scale, { toValue: 1, duration: 130, useNativeDriver: true }),
     ]).start();
 
+    if (isComplete) {
+      onUnlog();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      return;
+    }
+
     const result = onLog();
     if (result === 'completed') {
       triggerReward();
@@ -70,47 +78,60 @@ export default function HabitCard({ habit, log, streak, onLog, onLongPress, onAl
       <Animated.View style={[styles.card, { borderColor }]}>
         <ParticleBurst trigger={burst} onDone={() => setBurst(false)} />
 
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={handlePress}
-          onLongPress={onLongPress}
-          style={styles.inner}
-        >
-          <View style={styles.left}>
-            <View style={[styles.iconBg, { backgroundColor: habit.color + '22' }]}>
-              <Text style={styles.icon}>{habit.icon}</Text>
+        <View style={styles.inner}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={handlePress}
+            onLongPress={onLongPress}
+            style={styles.mainContent}
+          >
+            <View style={styles.left}>
+              <View style={[styles.iconBg, { backgroundColor: habit.color + '22' }]}>
+                <Text style={styles.icon}>{habit.icon}</Text>
+              </View>
+              <View style={styles.info}>
+                <Text style={[styles.name, isComplete && styles.nameDone]}>
+                  {habit.name}
+                </Text>
+                <Text style={styles.streak}>🔥 {streak} day streak</Text>
+              </View>
             </View>
-            <View style={styles.info}>
-              <Text style={[styles.name, isComplete && styles.nameDone]}>
-                {habit.name}
-              </Text>
-              <Text style={styles.streak}>🔥 {streak} day streak</Text>
-            </View>
-          </View>
 
-          {habit.type === 'daily' ? (
-            <View style={[styles.checkbox, isComplete && { backgroundColor: habit.color, borderColor: habit.color }]}>
-              {isComplete && <Text style={styles.check}>✓</Text>}
-            </View>
-          ) : (
-            <View style={styles.volumeContainer}>
-              <Text style={[styles.volumeCount, { color: isComplete ? habit.color : Colors.textPrimary }]}>
-                {completedCount}
-                <Text style={styles.volumeTarget}>/{habit.targetCount}</Text>
-              </Text>
-              {!isComplete && (
-                <View style={[styles.plusBtn, { backgroundColor: habit.color + '22', borderColor: habit.color + '55' }]}>
-                  <Text style={[styles.plusText, { color: habit.color }]}>+</Text>
-                </View>
-              )}
-              {isComplete && (
-                <View style={[styles.checkSmall, { backgroundColor: habit.color }]}>
-                  <Text style={styles.check}>✓</Text>
-                </View>
-              )}
-            </View>
+            {habit.type === 'daily' ? (
+              <View style={[styles.checkbox, isComplete && { backgroundColor: habit.color, borderColor: habit.color }]}>
+                {isComplete && <Text style={styles.check}>✓</Text>}
+              </View>
+            ) : (
+              <View style={styles.volumeContainer}>
+                <Text style={[styles.volumeCount, { color: isComplete ? habit.color : Colors.textPrimary }]}>
+                  {completedCount}
+                  <Text style={styles.volumeTarget}>/{habit.targetCount}</Text>
+                </Text>
+                {!isComplete && (
+                  <View style={[styles.plusBtn, { backgroundColor: habit.color + '22', borderColor: habit.color + '55' }]}>
+                    <Text style={[styles.plusText, { color: habit.color }]}>+</Text>
+                  </View>
+                )}
+                {isComplete && (
+                  <View style={[styles.checkSmall, { backgroundColor: habit.color }]}>
+                    <Text style={styles.check}>✓</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {onDelete && (
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={onDelete}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.deleteIcon}>🗑</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+        </View>
       </Animated.View>
     </Animated.View>
   );
@@ -127,8 +148,26 @@ const styles = StyleSheet.create({
   inner: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 14,
+    paddingLeft: 14,
+    paddingRight: 8,
+  },
+  mainContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
+  },
+  deleteBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteIcon: {
+    fontSize: 16,
+    opacity: 0.5,
   },
   left: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Platform,
   ScrollView,
@@ -27,9 +28,21 @@ function greeting() {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { habits, userName, logHabit, getStreak, getTodayLog, deleteHabit } = useStore();
+  const { habits, userName, logHabit, unlogHabit, getStreak, getTodayLog, deleteHabit, fetchAIInsight, getLatestInsight, aiLoading } = useStore();
 
   const [allDoneOverlay, setAllDoneOverlay] = useState(false);
+  const [nudgeError, setNudgeError] = useState<string | null>(null);
+
+  const nudge = getLatestInsight('nudge');
+
+  const handleGetNudge = async () => {
+    setNudgeError(null);
+    try {
+      await fetchAIInsight('nudge');
+    } catch {
+      setNudgeError('Could not reach AI service. Try again later.');
+    }
+  };
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
@@ -134,13 +147,53 @@ export default function HomeScreen() {
           )}
         </View>
 
-        <Text style={styles.sectionTitle}>Habits</Text>
+        {/* AI Coaching Nudge */}
+        {habits.length > 0 && (
+          <View style={styles.nudgeCard}>
+            <View style={styles.nudgeHeader}>
+              <Text style={styles.nudgeTitle}>AI Coach</Text>
+              <TouchableOpacity
+                onPress={handleGetNudge}
+                disabled={aiLoading}
+                style={styles.nudgeRefreshBtn}
+              >
+                {aiLoading ? (
+                  <ActivityIndicator size="small" color={Colors.accent} />
+                ) : (
+                  <Text style={styles.nudgeRefreshText}>{nudge ? '↻' : 'Get tip'}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            {nudgeError ? (
+              <Text style={styles.nudgeError}>{nudgeError}</Text>
+            ) : nudge ? (
+              <Text style={styles.nudgeContent}>{nudge.content}</Text>
+            ) : (
+              <Text style={styles.nudgePlaceholder}>
+                Tap "Get tip" for a personalized coaching message.
+              </Text>
+            )}
+          </View>
+        )}
+
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Habits</Text>
+          <Text style={styles.habitCount}>{habits.length}/5</Text>
+        </View>
 
         {habits.length === 0 && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyEmoji}>🌱</Text>
             <Text style={styles.emptyText}>No habits yet. Tap + to create one.</Text>
           </View>
+        )}
+
+        {habits.length > 0 && habits.length < 3 && (
+          <Text style={styles.minHintText}>Add at least {3 - habits.length} more habit{3 - habits.length > 1 ? 's' : ''} to build a strong routine.</Text>
+        )}
+
+        {habits.length >= 5 && (
+          <Text style={styles.maxHintText}>Maximum 5 habits reached. Remove one to add another.</Text>
         )}
 
         {habits.map((habit, i) => (
@@ -150,21 +203,24 @@ export default function HomeScreen() {
             log={todayLogs[i]}
             streak={getStreak(habit.id)}
             onLog={() => handleLog(habit.id)}
-            onLongPress={() => deleteHabit(habit.id)}
+            onUnlog={() => unlogHabit(habit.id)}
+            onDelete={() => deleteHabit(habit.id)}
           />
         ))}
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => router.push('/habit-modal')}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
+      {/* FAB — hidden at max capacity */}
+      {habits.length < 5 && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push('/habit-modal')}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.fabText}>+</Text>
+        </TouchableOpacity>
+      )}
 
       <CelebrationOverlay
         visible={allDoneOverlay}
@@ -256,11 +312,80 @@ const styles = StyleSheet.create({
     color: Colors.accent,
     fontWeight: '600',
   },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: Colors.textPrimary,
-    marginBottom: 12,
+  },
+  habitCount: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontWeight: '600',
+  },
+  minHintText: {
+    fontSize: 13,
+    color: Colors.accent,
+    marginBottom: 10,
+    opacity: 0.8,
+  },
+  maxHintText: {
+    fontSize: 13,
+    color: '#F87171',
+    marginBottom: 10,
+  },
+  nudgeCard: {
+    backgroundColor: Colors.card,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderWidth: 1.5,
+    borderColor: Colors.accent + '44',
+  },
+  nudgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  nudgeTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.accent,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  nudgeRefreshBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.accent + '22',
+    minWidth: 52,
+    alignItems: 'center',
+  },
+  nudgeRefreshText: {
+    color: Colors.accent,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  nudgeContent: {
+    fontSize: 14,
+    color: Colors.textPrimary,
+    lineHeight: 21,
+  },
+  nudgePlaceholder: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  nudgeError: {
+    fontSize: 13,
+    color: Colors.rose,
   },
   emptyState: {
     alignItems: 'center',

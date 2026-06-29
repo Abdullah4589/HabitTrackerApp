@@ -7,7 +7,6 @@ export default function Index() {
   const userId = useStore(s => s.userId);
   const onboardingComplete = useStore(s => s.onboardingComplete);
   const isHydrating = useStore(s => s.isHydrating);
-
   if (isHydrating) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.bg, justifyContent: 'center', alignItems: 'center' }}>

@@ -85,14 +85,6 @@ export default function SignIn() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={styles.forgotBtn}
-            onPress={() => router.push('/auth/forgot-password')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
-
           {!!error && <Text style={styles.error}>{error}</Text>}
 
           <TouchableOpacity
@@ -101,10 +93,7 @@ export default function SignIn() {
             disabled={loading}
             activeOpacity={0.85}
           >
-            {loading
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.primaryBtnText}>Sign In</Text>
-            }
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Sign In</Text>}
           </TouchableOpacity>
         </View>
 
@@ -193,15 +182,6 @@ const styles = StyleSheet.create({
   },
   eyeIcon: {
     fontSize: 18,
-  },
-  forgotBtn: {
-    alignSelf: 'flex-end',
-    marginTop: 8,
-  },
-  forgotText: {
-    color: Colors.accent,
-    fontSize: 13,
-    fontWeight: '600',
   },
   error: {
     color: Colors.rose,

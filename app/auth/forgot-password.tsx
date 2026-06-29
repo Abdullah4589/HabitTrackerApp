@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/supabase';
 import { Colors, Radii, Spacing } from '../../src/theme';
@@ -21,57 +19,47 @@ export default function ForgotPassword() {
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
 
-  const handleReset = async () => {
+  const handleSend = async () => {
     if (!email.trim()) return;
     setLoading(true);
     setError('');
-    const { error: authError } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase()
+    const { error: err } = await supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      { redirectTo: 'habittrackerapp://' }
     );
     setLoading(false);
-    if (authError) {
-      setError(authError.message);
+    if (err) {
+      setError(err.message);
     } else {
       setSent(true);
     }
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+    <View style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
 
-        <View style={styles.header}>
-          <Text style={styles.title}>Forgot password?</Text>
-          <Text style={styles.subtitle}>
-            Enter your email and we'll send you a link to reset your password.
-          </Text>
-        </View>
+        <Text style={styles.title}>Forgot password?</Text>
 
         {sent ? (
           <View style={styles.successBox}>
             <Text style={styles.successIcon}>📬</Text>
             <Text style={styles.successTitle}>Check your email</Text>
             <Text style={styles.successBody}>
-              We sent a password reset link to{' '}
-              <Text style={styles.successEmail}>{email.trim().toLowerCase()}</Text>.
-              {'\n\n'}It may take a minute to arrive. Check your spam folder if you don't see it.
+              We sent a reset link to{'\n'}
+              <Text style={styles.emailText}>{email.trim().toLowerCase()}</Text>
+              {'\n\n'}Open the email on your phone and tap the link — it will bring you back here to set a new password.
             </Text>
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => router.replace('/auth')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnText}>Back to Sign In</Text>
+            <TouchableOpacity style={styles.btn} onPress={() => router.replace('/auth')} activeOpacity={0.85}>
+              <Text style={styles.btnText}>Back to Sign In</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.form}>
+            <Text style={styles.subtitle}>Enter your email and we'll send you a link to reset your password.</Text>
             <Text style={styles.label}>Email</Text>
             <TextInput
               style={styles.input}
@@ -83,26 +71,21 @@ export default function ForgotPassword() {
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="done"
-              onSubmitEditing={handleReset}
+              onSubmitEditing={handleSend}
             />
-
             {!!error && <Text style={styles.error}>{error}</Text>}
-
             <TouchableOpacity
-              style={[styles.primaryBtn, (!email.trim() || loading) && styles.primaryBtnDisabled]}
-              onPress={handleReset}
+              style={[styles.btn, (!email.trim() || loading) && styles.btnDisabled]}
+              onPress={handleSend}
               disabled={!email.trim() || loading}
               activeOpacity={0.85}
             >
-              {loading
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.primaryBtnText}>Send Reset Link</Text>
-              }
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Send Reset Link</Text>}
             </TouchableOpacity>
           </View>
         )}
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -112,37 +95,34 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bg,
   },
   container: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    paddingTop: 60,
+    paddingBottom: Spacing.xl,
   },
   backBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.xl,
   },
   backText: {
     color: Colors.accent,
     fontSize: 15,
     fontWeight: '600',
   },
-  header: {
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.xl,
-  },
   title: {
     fontSize: 28,
     fontWeight: '800',
     color: Colors.textPrimary,
     letterSpacing: -0.5,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   subtitle: {
     fontSize: 15,
     color: Colors.textMuted,
     lineHeight: 22,
+    marginBottom: Spacing.lg,
   },
   form: {
-    gap: 6,
+    gap: 8,
   },
   label: {
     fontSize: 12,
@@ -150,7 +130,7 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   input: {
     backgroundColor: Colors.card,
@@ -161,24 +141,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingHorizontal: Spacing.md,
     paddingVertical: 14,
+    marginBottom: 8,
   },
   error: {
     color: Colors.rose,
     fontSize: 13,
-    marginTop: 8,
     textAlign: 'center',
   },
-  primaryBtn: {
+  btn: {
     backgroundColor: Colors.accent,
     borderRadius: Radii.md,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: Spacing.lg,
+    marginTop: Spacing.sm,
   },
-  primaryBtnDisabled: {
+  btnDisabled: {
     opacity: 0.4,
   },
-  primaryBtnText: {
+  btnText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
@@ -190,7 +170,6 @@ const styles = StyleSheet.create({
   },
   successIcon: {
     fontSize: 56,
-    marginBottom: Spacing.sm,
   },
   successTitle: {
     fontSize: 22,
@@ -203,7 +182,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-  successEmail: {
+  emailText: {
     color: Colors.textPrimary,
     fontWeight: '600',
   },

@@ -2,6 +2,8 @@
 
 A mobile-first habit tracking app built with Expo SDK 56 and React Native. Track daily habits, build streaks, complete challenges, and get personalized AI coaching — all backed by Supabase with real-time cloud sync.
 
+**Live demo:** [habit-tracker-app-dusky-psi.vercel.app](https://habit-tracker-app-dusky-psi.vercel.app)
+
 ## Screenshots
 
 | Sign In | Sign Up | Today |

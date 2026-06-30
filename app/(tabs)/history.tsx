@@ -81,18 +81,22 @@ export default function HistoryScreen() {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.auth.signOut();
-          clearUserData();
-          router.replace('/auth');
-        },
-      },
-    ]);
+    const doSignOut = async () => {
+      await supabase.auth.signOut();
+      clearUserData();
+      router.replace('/auth');
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to sign out?')) {
+        doSignOut();
+      }
+    } else {
+      Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: doSignOut },
+      ]);
+    }
   };
   const allLogs = getAllCompletedLogs();
 

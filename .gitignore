@@ -43,3 +43,6 @@ yarn-error.*
 /android
 /CLAUDE.md
 /AGENTS.md
+
+.vercel
+.env*
